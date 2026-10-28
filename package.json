@@ -1,0 +1,10 @@
+{
+  "name": "duskmire",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8741",
+    "simulate": "node tools/simulate.js",
+    "test": "node tools/simulate.js && node tools/nav.test.js && node tools/items.test.js"
+  }
+}

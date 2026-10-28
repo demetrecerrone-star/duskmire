@@ -72,6 +72,7 @@ button:focus-visible {
 }
 
 #app {
+  height: 100vh;
   height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -339,16 +340,32 @@ button:focus-visible {
 
 #sidebar {
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding: 0.75rem 0.8rem 1rem;
   background:
     linear-gradient(180deg, rgba(42, 34, 27, 0.96), rgba(22, 17, 13, 0.98));
   border-top: 1px solid var(--line);
 }
 
+#panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0.8rem 1rem;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+#tabbar { display: none; }
+
 #layout.world #pack { order: -1; }
+
+/* In a fight the controls come before the pack so Attack is never below the fold. */
+#layout.fighting #fight-screen { order: -1; }
 
 .equipped {
   margin: 0 0 0.45rem;
@@ -744,21 +761,142 @@ button:focus-visible {
 .zone-card strong { font-size: 0.98rem; }
 .zone-card small { color: var(--parchment-dim); }
 
+/* Phones and narrow tablets: compact header, view on top, one tabbed panel below. */
 @media (max-width: 979px) {
-  #layout.world {
-    grid-template-rows: minmax(320px, 68dvh) minmax(0, 1fr);
+  #topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "brand badge settings"
+      "skills skills skills";
+    gap: 0.35rem 0.5rem;
+    padding: 0.35rem 0.55rem 0.4rem;
+    padding-top: max(0.35rem, env(safe-area-inset-top));
   }
 
+  .brand { grid-area: brand; min-width: 0; }
+  .brand .eyebrow { display: none; }
+  .brand h1 { font-size: 1.25rem; white-space: nowrap; }
+
+  #combat-badge {
+    grid-area: badge;
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    min-width: 0;
+    padding: 0.3rem 0.55rem;
+  }
+  #combat-badge strong { display: inline; font-size: 1.05rem; }
+  #combat-badge span { font-size: 0.64rem; }
+
+  #settings-toggle {
+    grid-area: settings;
+    width: 44px;
+    min-height: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+  #settings-toggle span { display: none; }
+
+  #skills {
+    grid-area: skills;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.25rem;
+  }
+  .skill { min-width: 0; padding: 0.1rem 0.3rem 0.2rem; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.25rem; }
+  .skill small { font-size: 0.6rem; }
+  .skill b { display: inline; font-size: 0.88rem; }
+  .skill i { flex-basis: 100%; }
+
+  #layout,
+  #layout.world,
   #layout.fighting {
-    grid-template-rows: minmax(260px, 46dvh) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(150px, 1fr) minmax(0, 48dvh);
   }
 
-  #layout.fighting .log { max-height: 128px; }
+  #tabbar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+    padding: 0.4rem 0.55rem;
+    border-bottom: 1px solid rgba(196, 161, 90, 0.28);
+    background: rgba(26, 21, 17, 0.85);
+  }
+  #tabbar button {
+    min-height: 44px;
+    padding: 0.25rem 0.4rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+  }
+  #tabbar button[aria-selected="true"] {
+    border-color: var(--ochre);
+    background: linear-gradient(180deg, #6a5438, #3c2e22);
+    box-shadow: inset 0 0 0 1px rgba(196, 161, 90, 0.45);
+  }
 
-  #layout.fighting .attack {
-    position: sticky;
-    bottom: 0.35rem;
-    z-index: 2;
+  #panel-body { padding: 0.6rem 0.65rem 0.9rem; }
+
+  .pack-title { display: none; }
+  #app[data-tab="play"] #pack { display: none; }
+  #app:not([data-tab="play"]) #select-screen,
+  #app:not([data-tab="play"]) #fight-screen { display: none; }
+  #app[data-tab="pack"] .pack-gear { display: none; }
+  #app[data-tab="gear"] .pack-inv { display: none; }
+
+  /* In a fight the Attack button leads the panel so it is always on screen. */
+  #fight-screen:not([hidden]) { display: flex; flex-direction: column; }
+  #app:not([data-tab="play"]) #fight-screen { display: none; }
+  #fight-screen .attack { order: 1; }
+  #fight-screen .style-row { order: 2; grid-template-columns: repeat(auto-fit, minmax(4.6rem, 1fr)); gap: 0.35rem; }
+  #fight-screen .style-row small { display: none; }
+  #fight-screen .style-row button { padding: 0.35rem 0.4rem; font-size: 0.85rem; min-width: 0; overflow-wrap: anywhere; }
+  #fight-screen .preview { order: 3; font-size: 0.85rem; }
+  #fight-screen #fight-actions { order: 4; }
+  #fight-screen .log { order: 5; max-height: none; }
+  #fight-screen .weapon-row { order: 6; }
+  #fight-screen .key-hint { order: 7; }
+
+  .zone-list { grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); }
+
+  #settings-panel {
+    top: 3.4rem;
+    max-height: calc(100dvh - 4rem);
+    overflow: auto;
+  }
+
+  .result-card {
+    max-height: calc(100dvh - 2rem);
+    overflow: auto;
+  }
+}
+
+/* Phone held sideways: view on the left, panel on the right, one-line header. */
+@media (max-width: 979px) and (orientation: landscape) and (max-height: 600px) {
+  #topbar {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas: "brand badge skills settings";
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+    padding-left: max(0.55rem, env(safe-area-inset-left));
+    padding-right: max(0.55rem, env(safe-area-inset-right));
+  }
+  .brand h1 { font-size: 1.05rem; }
+
+  #layout,
+  #layout.world,
+  #layout.fighting {
+    grid-template-columns: minmax(0, 1fr) min(380px, 46vw);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  #sidebar {
+    border-top: none;
+    border-left: 1px solid var(--line);
+    padding-right: env(safe-area-inset-right);
   }
 }
 

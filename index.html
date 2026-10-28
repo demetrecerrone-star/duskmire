@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="css/style.css" />
   </head>
   <body>
-    <div id="app">
+    <div id="app" data-tab="play">
       <header id="topbar">
         <div class="brand">
           <p class="eyebrow">The marsh road</p>
@@ -17,7 +17,7 @@
         </div>
         <div id="combat-badge" aria-live="polite"></div>
         <div id="skills"></div>
-        <button id="settings-toggle" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-panel">
+        <button id="settings-toggle" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-panel">
           <svg viewBox="0 0 24 24" aria-hidden="true" width="22" height="22">
             <path fill="currentColor" d="M19.4 13.5a7.7 7.7 0 0 0 .06-1.5 7.7 7.7 0 0 0-.06-1.5l2.02-1.58a.5.5 0 0 0 .12-.64l-1.91-3.3a.5.5 0 0 0-.6-.22l-2.38.96a7.4 7.4 0 0 0-2.6-1.5l-.36-2.54A.5.5 0 0 0 13.2 1h-3.4a.5.5 0 0 0-.49.42l-.36 2.54a7.4 7.4 0 0 0-2.6 1.5l-2.38-.96a.5.5 0 0 0-.6.22l-1.91 3.3a.5.5 0 0 0 .12.64L3.6 10.5a7.7 7.7 0 0 0 0 3l-2.02 1.58a.5.5 0 0 0-.12.64l1.91 3.3a.5.5 0 0 0 .6.22l2.38-.96a7.4 7.4 0 0 0 2.6 1.5l.36 2.54a.5.5 0 0 0 .49.42h3.4a.5.5 0 0 0 .49-.42l.36-2.54a7.4 7.4 0 0 0 2.6-1.5l2.38.96a.5.5 0 0 0 .6-.22l1.91-3.3a.5.5 0 0 0-.12-.64L19.4 13.5zM11.5 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/>
           </svg>
@@ -45,9 +45,16 @@
           <p id="stage-error" hidden></p>
         </div>
         <aside id="sidebar">
-          <section id="pack" aria-label="Inventory and equipment"></section>
-          <section id="select-screen"></section>
-          <section id="fight-screen" hidden></section>
+          <nav id="tabbar" role="tablist" aria-label="Panels">
+            <button type="button" role="tab" id="tab-play" data-tab="play" aria-selected="true" aria-controls="panel-body">Road</button>
+            <button type="button" role="tab" id="tab-pack" data-tab="pack" aria-selected="false" aria-controls="panel-body">Pack</button>
+            <button type="button" role="tab" id="tab-gear" data-tab="gear" aria-selected="false" aria-controls="panel-body">Gear</button>
+          </nav>
+          <div id="panel-body">
+            <section id="pack" aria-label="Inventory and equipment"></section>
+            <section id="select-screen"></section>
+            <section id="fight-screen" hidden></section>
+          </div>
         </aside>
       </div>
     </div>

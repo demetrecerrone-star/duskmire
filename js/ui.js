@@ -42,6 +42,23 @@ export function mountUi(handlers) {
   const compareClose = document.getElementById("compare-close");
   let graphicsState = { graphics: "standard", compare: false };
   let hintTimer = 0;
+  const app = document.getElementById("app");
+  const tabbar = document.getElementById("tabbar");
+  const panelBody = document.getElementById("panel-body");
+  let currentScreen = null;
+
+  /** Phone layout: one panel at a time under the view. Desktop CSS ignores the tab. */
+  function setTab(name) {
+    if (!app) return;
+    app.dataset.tab = name;
+    for (const button of tabbar?.querySelectorAll("[data-tab]") || []) {
+      button.setAttribute("aria-selected", button.dataset.tab === name ? "true" : "false");
+    }
+    if (panelBody) panelBody.scrollTop = 0;
+  }
+  for (const button of tabbar?.querySelectorAll("[data-tab]") || []) {
+    button.addEventListener("click", () => setTab(button.dataset.tab));
+  }
 
   const fight = {
     weapons: el("div", "weapon-row"),
@@ -248,7 +265,10 @@ export function mountUi(handlers) {
     ]
       .filter(([, value]) => value)
       .map(([label, value]) => `${label} +${value}`);
-    packRoot.append(board, el("p", "bonus-line", bits.length ? bits.join(" · ") : "No gear bonuses yet."));
+    const gearPart = el("div", "pack-gear");
+    gearPart.append(board, el("p", "bonus-line", bits.length ? bits.join(" · ") : "No gear bonuses yet."));
+    const invPart = el("div", "pack-inv");
+    packRoot.append(gearPart, invPart);
 
     const grid = el("div", "inv-grid");
     const slotsModel = model.inventory || [];
@@ -270,7 +290,7 @@ export function mountUi(handlers) {
       }
       grid.append(button);
     }
-    packRoot.append(grid);
+    invPart.append(grid);
     const actions = el("div", "pack-actions");
     const selectedRaw = model.selectedIndex != null ? slotsModel[model.selectedIndex] : null;
     const selected = selectedRaw ? getItem(selectedRaw.itemId) : null;
@@ -300,7 +320,7 @@ export function mountUi(handlers) {
     } else {
       actions.append(el("p", "pack-note", "Tap a slot to equip, eat, or drop it. Coins stack."));
     }
-    packRoot.append(actions);
+    invPart.append(actions);
   }
 
   function setPlates(playerPlate, enemyPlate) {
@@ -478,6 +498,12 @@ export function mountUi(handlers) {
       node.style.top = `${info.y}px`;
     },
     setScreen(name) {
+      if (name !== currentScreen) {
+        if (name === "fight") setTab("play");
+        currentScreen = name;
+      }
+      const playTab = document.getElementById("tab-play");
+      if (playTab) playTab.textContent = name === "fight" ? "Fight" : name === "world" ? "Road" : "Foes";
       selectScreen.hidden = name === "fight";
       fightScreen.hidden = name !== "fight";
       const layout = document.getElementById("layout");

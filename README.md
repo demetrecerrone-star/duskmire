@@ -1,5 +1,9 @@
 # Duskmire
 
+## ▶ [Play now](https://demetrecerrone-star.github.io/duskmire/)
+
+**[https://demetrecerrone-star.github.io/duskmire/](https://demetrecerrone-star.github.io/duskmire/)** — runs in any modern browser on PC or Android.
+
 A solo fight on a dusk marsh road. One adventurer, four foes, three weapons, and the Old School RuneScape combat formulas — hit rolls, max hits, combat level, and the experience curve — played out in a smooth low-poly clearing.
 
 There is no build step. The browser and the Node simulation import the same modules. Nothing under `js/` that the simulation imports touches the DOM.

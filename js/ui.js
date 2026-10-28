@@ -30,6 +30,7 @@ export function mountUi(handlers) {
   const skillsRoot = document.getElementById("skills");
   const badge = document.getElementById("combat-badge");
   const packRoot = document.getElementById("pack");
+  const zonesRoot = document.getElementById("zones");
   const selectScreen = document.getElementById("select-screen");
   const fightScreen = document.getElementById("fight-screen");
   const result = document.getElementById("result");
@@ -165,7 +166,7 @@ export function mountUi(handlers) {
       el(
         "p",
         "lede",
-        "The marsh road runs east: goblin camp, a farm, the town gate, then the wood. Tap the ground to walk. Drag to turn the view, scroll or pinch to zoom.",
+        "The marsh road runs east: goblin camp, a farm, the town gate, then the wood. Tap the ground to walk, or tap a foe to fight. Drag to turn the view, scroll or pinch to zoom.",
       ),
     );
     const weapon = getWeapon(model.weaponId);
@@ -180,6 +181,7 @@ export function mountUi(handlers) {
     }
     selectScreen.append(el("p", "equipped", `Wielding ${weapon.name}.`), styles, el("p", "preview", model.preview));
     const list = el("div", "zone-list");
+    zonesRoot?.replaceChildren(el("h2", "zones-title", "Zones · tap one to travel"), list);
     for (const zone of model.zones || []) {
       const card = el("button", "zone-card");
       card.type = "button";
@@ -198,9 +200,10 @@ export function mountUi(handlers) {
     const reset = el("button", "linkish", "Abandon saved progress");
     reset.type = "button";
     reset.addEventListener("click", () => handlers.onReset());
-    const touch = el("p", "key-hint touch-hint", "On a phone: tap to walk, drag to look, pinch to zoom. A foe’s name appears when you tap them.");
+    const touch = el("p", "key-hint touch-hint", "On a phone: tap the ground to walk, tap a foe to fight. Drag one finger to turn and tilt, pinch to zoom, twist two fingers to turn.");
     const keys = el("p", "key-hint", "WASD or arrows walk. Q and E turn the camera. Right-drag looks. Click a foe to approach.");
-    selectScreen.append(list, touch, keys, reset);
+    if (!zonesRoot) selectScreen.append(list);
+    selectScreen.append(touch, keys, reset);
   }
 
   function renderFightChrome(model) {
@@ -505,6 +508,7 @@ export function mountUi(handlers) {
       const playTab = document.getElementById("tab-play");
       if (playTab) playTab.textContent = name === "fight" ? "Fight" : name === "world" ? "Road" : "Foes";
       selectScreen.hidden = name === "fight";
+      if (zonesRoot) zonesRoot.hidden = name !== "world";
       fightScreen.hidden = name !== "fight";
       const layout = document.getElementById("layout");
       layout.classList.toggle("fighting", name === "fight");

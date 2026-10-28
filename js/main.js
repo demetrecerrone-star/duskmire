@@ -653,6 +653,15 @@ try {
   });
   state.worldReady = true;
   state.screen = "world";
+  if (params.has("debug")) {
+    // Read-only peek for automated touch tests: where foes stand on screen and how the camera sits.
+    window.duskmireDebug = {
+      spawns: () => world.getSpawns().map((spawn) => ({ id: spawn.id, enemyId: spawn.enemyId, ...world.screenOf(spawn.id) })),
+      camera: () => world.getCamera(),
+      screen: () => state.screen,
+      render: () => ({ ...scene.renderer.info.render, pixelRatio: scene.renderer.getPixelRatio() }),
+    };
+  }
 } catch (error) {
   state.worldReady = false;
   state.screen = "select";

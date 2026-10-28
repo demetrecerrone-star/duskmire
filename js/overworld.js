@@ -86,6 +86,13 @@ function disposeObject(object) {
   });
 }
 
+/** Camera limits keep the angled RS3-style view: never flat to the ground, never straight down. */
+export const CAMERA = { pitch: 0.72, minPitch: 0.42, maxPitch: 1.12, minDistance: 9, maxDistance: 40 };
+const clampDistance = (value) => Math.min(CAMERA.maxDistance, Math.max(CAMERA.minDistance, value));
+const clampPitch = (value) => Math.min(CAMERA.maxPitch, Math.max(CAMERA.minPitch, value));
+/** How far (CSS px) from a foe's body a finger may land and still pick them. */
+const TOUCH_PICK_SLOP = 34;
+
 export function mountOverworld(canvas, renderer, options = {}) {
   const grid = createWorldGrid();
   const props = layoutProps(11);
@@ -101,6 +108,7 @@ export function mountOverworld(canvas, renderer, options = {}) {
   let facing = Math.PI / 2;
   let yaw = Math.PI / 2;
   let distance = 22;
+  let pitch = CAMERA.pitch;
   let path = [];
   let pendingEngage = null;
   let pendingLoot = null;
@@ -299,7 +307,7 @@ export function mountOverworld(canvas, renderer, options = {}) {
       const view = views.get(rect.quality);
       if (!view) continue;
       view.sync(pos, facing, spawns, getDefeated(), now, moving, path, loot);
-      view.frameCamera(pos, yaw, distance);
+      view.frameCamera(pos, yaw, distance, pitch);
       renderer.setViewport(rect.x * ratio, rect.y * ratio, rect.w * ratio, rect.h * ratio);
       renderer.setScissor(rect.x * ratio, rect.y * ratio, rect.w * ratio, rect.h * ratio);
       renderer.toneMappingExposure = view.exposure;
@@ -346,7 +354,7 @@ export function mountOverworld(canvas, renderer, options = {}) {
     render(now);
   }
 
-  function pick(event) {
+  function pick(event, slop = 0) {
     const bounds = canvas.getBoundingClientRect();
     const x = event.clientX - bounds.left;
     const y = event.clientY - bounds.top;
@@ -373,6 +381,26 @@ export function mountOverworld(canvas, renderer, options = {}) {
     const enemyHits = raycaster.intersectObjects(view.picks, false);
     if (enemyHits[0]?.object?.userData?.spawnId) {
       return { spawn: spawnById(enemyHits[0].object.userData.spawnId) };
+    }
+    if (slop > 0) {
+      // A fingertip is wider than a far-off goblin: take the nearest standing foe under it.
+      let best = null;
+      let bestDist = slop;
+      const now = Date.now();
+      for (const spawn of spawns) {
+        if (spawn.downUntil && now < spawn.downUntil) continue;
+        const baseY = groundY(spawn.x, spawn.z);
+        for (const lift of [0.3, 1.0, 1.7]) {
+          const spot = project(view, spawn.x, baseY + lift, spawn.z, chosen);
+          if (aim.z > 1) continue;
+          const d = Math.hypot(spot.x - x, spot.y - y);
+          if (d < bestDist) {
+            bestDist = d;
+            best = spawn;
+          }
+        }
+      }
+      if (best) return { spawn: best };
     }
     const groundHits = raycaster.intersectObject(view.ground, false);
     if (groundHits[0]) return { point: { x: groundHits[0].point.x, z: groundHits[0].point.z } };
@@ -491,7 +519,7 @@ export function mountOverworld(canvas, renderer, options = {}) {
     (event) => {
       if (!active) return;
       event.preventDefault();
-      distance = Math.min(42, Math.max(9, distance * (1 + event.deltaY * 0.001)));
+      distance = clampDistance(distance * (1 + event.deltaY * 0.001));
     },
     { passive: false },
   );
@@ -506,7 +534,8 @@ export function mountOverworld(canvas, renderer, options = {}) {
     gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: 0, button: event.button, look: event.button === 2 };
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
-      pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), angle: Math.atan2(b.y - a.y, b.x - a.x) };
+      pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), angle: Math.atan2(b.y - a.y, b.x - a.x), midY: (a.y + b.y) / 2 };
+      if (gesture) gesture.look = true;
     }
   });
   canvas.addEventListener("pointermove", (event) => {
@@ -521,17 +550,30 @@ export function mountOverworld(canvas, renderer, options = {}) {
         const [a, b] = [...pointers.values()];
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
         const angle = Math.atan2(b.y - a.y, b.x - a.x);
+        const midY = (a.y + b.y) / 2;
         if (pinch) {
-          if (pinch.dist > 0) distance = Math.min(42, Math.max(9, distance * (pinch.dist / dist)));
-          yaw += angle - pinch.angle;
+          // Pinch zooms, twisting turns the camera, and sliding both fingers up or down tilts it.
+          if (pinch.dist > 0 && dist > 0) distance = clampDistance(distance * (pinch.dist / dist));
+          let turn = angle - pinch.angle;
+          if (turn > Math.PI) turn -= Math.PI * 2;
+          if (turn < -Math.PI) turn += Math.PI * 2;
+          yaw += turn;
+          pitch = clampPitch(pitch + (midY - pinch.midY) * 0.006);
         }
-        pinch = { dist, angle };
+        pinch = { dist, angle, midY };
+        if (gesture) gesture.look = true;
         return;
       }
-      if (gesture?.look || (event.pointerType !== "mouse" && gesture && gesture.moved > 14)) {
+      if (event.pointerType !== "mouse" && gesture && (gesture.look || gesture.moved > 14)) {
+        // One finger dragged past the tap threshold: swing around the player and tilt.
+        yaw -= dx * 0.009;
+        pitch = clampPitch(pitch + dy * 0.005);
+        gesture.look = true;
+        return;
+      }
+      if (gesture?.look) {
         yaw -= dx * 0.008;
-        distance = Math.min(42, Math.max(9, distance + dy * 0.03));
-        if (gesture) gesture.look = true;
+        distance = clampDistance(distance + dy * 0.03);
         return;
       }
     }
@@ -546,7 +588,7 @@ export function mountOverworld(canvas, renderer, options = {}) {
     const tap = gesture.button === 0 && !gesture.look && gesture.moved < (event.pointerType === "mouse" ? 8 : 16);
     gesture = null;
     if (!active || !tap) return;
-    const hit = pick(event);
+    const hit = pick(event, event.pointerType === "mouse" ? 0 : TOUCH_PICK_SLOP);
     if (hit?.loot) {
       walkToLoot(hit.loot);
       return;
@@ -629,6 +671,19 @@ export function mountOverworld(canvas, renderer, options = {}) {
     },
     nearestZone() {
       return nearestZone(pos.x, pos.z);
+    },
+    /** Where a foe stands on screen, in page CSS pixels (used by the touch tests). */
+    screenOf(spawnId) {
+      const spawn = spawnById(spawnId);
+      const primary = layoutRects[0];
+      const view = primary && views.get(primary.quality);
+      if (!spawn || !view) return null;
+      const bounds = canvas.getBoundingClientRect();
+      const spot = project(view, spawn.x, groundY(spawn.x, spawn.z) + 1.0, spawn.z, primary);
+      return { x: bounds.left + spot.x, y: bounds.top + spot.y, inside: spot.x >= 0 && spot.y >= 0 && spot.x <= bounds.width && spot.y <= bounds.height };
+    },
+    getCamera() {
+      return { yaw, pitch, distance };
     },
     resize,
     dispose() {
@@ -783,10 +838,10 @@ function buildView(qualityId, spawns, props, weaponId, gearSpec) {
       camera.aspect = width / Math.max(1, height);
       camera.updateProjectionMatrix();
     },
-    frameCamera(at, yaw, dist) {
+    frameCamera(at, yaw, dist, tilt = CAMERA.pitch) {
       const y = groundY(at.x, at.z);
-      const horizontal = dist * Math.cos(0.72);
-      camera.position.set(at.x - Math.sin(yaw) * horizontal, y + 1.4 + dist * Math.sin(0.72), at.z - Math.cos(yaw) * horizontal);
+      const horizontal = dist * Math.cos(tilt);
+      camera.position.set(at.x - Math.sin(yaw) * horizontal, y + 1.4 + dist * Math.sin(tilt), at.z - Math.cos(yaw) * horizontal);
       camera.lookAt(at.x, y + 1.15, at.z);
       sun.position.set(at.x + 14, 22, at.z + 8);
       sun.target.position.set(at.x, 0, at.z);

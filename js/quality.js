@@ -78,8 +78,12 @@ export function isDetailed() {
   return current === "detailed";
 }
 
+/** Phones in either orientation: narrow, or a short touch screen held sideways. */
 export function isNarrowScreen() {
-  return typeof matchMedia === "function" && matchMedia("(max-width: 800px)").matches;
+  return (
+    typeof matchMedia === "function" &&
+    (matchMedia("(max-width: 800px)").matches || matchMedia("(max-height: 500px) and (pointer: coarse)").matches)
+  );
 }
 
 export function textureSize() {

@@ -363,6 +363,27 @@ button:focus-visible {
 #tabbar { display: none; }
 
 #layout.world #pack { order: -1; }
+#layout.world #zones { order: -2; }
+
+#zones[hidden] { display: none; }
+
+.zones-title {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ochre);
+}
+
+#zones .zone-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+}
+
+#zones .zone-card { padding: 0.4rem 0.55rem; min-height: 48px; }
+#zones .zone-card strong { font-size: 0.92rem; }
+#zones .zone-card small { font-size: 0.74rem; line-height: 1.2; }
 
 /* In a fight the controls come before the pack so Attack is never below the fold. */
 #layout.fighting #fight-screen { order: -1; }
@@ -472,6 +493,8 @@ button:focus-visible {
 .weapon-row, .graphics-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 .graphics-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.weapon-row .equipped { grid-column: 1 / -1; margin: 0; }
 
 .style-row { grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
 
@@ -842,6 +865,7 @@ button:focus-visible {
 
   .pack-title { display: none; }
   #app[data-tab="play"] #pack { display: none; }
+  #app:not([data-tab="play"]) #zones,
   #app:not([data-tab="play"]) #select-screen,
   #app:not([data-tab="play"]) #fight-screen { display: none; }
   #app[data-tab="pack"] .pack-gear { display: none; }
@@ -860,7 +884,6 @@ button:focus-visible {
   #fight-screen .weapon-row { order: 6; }
   #fight-screen .key-hint { order: 7; }
 
-  .zone-list { grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); }
 
   #settings-panel {
     top: 3.4rem;

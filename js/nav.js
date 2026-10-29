@@ -40,6 +40,34 @@ export const OBSTACLES = Object.freeze([
   { id: "pillar-n", kind: "pillar", x: 37.6, z: 9.4, r: 0.55 },
   { id: "pillar-s", kind: "pillar", x: 37.6, z: 15.1, r: 0.55 },
   { id: "log", kind: "log", x: 48.5, z: 15.6, r: 0.8 },
+  { id: "bank-booth", kind: "bank", x: 6.7, z: 20.9, r: 0.85, rot: Math.PI / 2 },
+  { id: "shop-stall", kind: "stall", x: 6.7, z: 24.3, r: 0.9, rot: Math.PI / 2 },
+  { id: "town-well", kind: "well", x: 2.3, z: 24.4, r: 0.55 },
+  { id: "town-house", kind: "house", x: 9.6, z: 22.6, r: 1.05, rot: Math.PI / 2 },
+]);
+
+/**
+ * The starter town south of the campfire. No foes walk here: a safe square with the bank
+ * booth and the general store. Spots are where the player stands to use each one.
+ */
+export const TOWN = Object.freeze({
+  id: "town",
+  name: "Duskmire town",
+  x: 4.6,
+  z: 22.6,
+  r: 3.6,
+  plaza: 2.5,
+  spots: Object.freeze({
+    bank: Object.freeze({ x: 5.45, z: 20.9, npcX: 7.55, npcZ: 20.9, name: "Banker" }),
+    shop: Object.freeze({ x: 5.4, z: 24.3, npcX: 7.6, npcZ: 24.3, name: "Shopkeeper" }),
+  }),
+});
+
+/** A short lane from the campfire down to the town square. */
+const TOWN_LANE = Object.freeze([
+  [4, 14],
+  [4.3, 18],
+  [4.6, 21.2],
 ]);
 
 const ROAD = Object.freeze([
@@ -97,6 +125,30 @@ export function distanceToPolyline(x, z, points = ROAD) {
 
 export function distanceToRoad(x, z) {
   return distanceToPolyline(x, z, ROAD);
+}
+
+/** The town lane and its paved square: flat, dirt-tinted, and kept clear of trees. */
+export function distanceToTownPaving(x, z) {
+  const lane = distanceToPolyline(x, z, TOWN_LANE);
+  const square = Math.max(0, Math.hypot(x - TOWN.x, z - TOWN.z) - TOWN.plaza);
+  return Math.min(lane, square);
+}
+
+/** Road or town paving, whichever is closer. Walk collision still uses the road alone. */
+export function distanceToPaths(x, z) {
+  return Math.min(distanceToRoad(x, z), distanceToTownPaving(x, z));
+}
+
+export function townLanePoints() {
+  return TOWN_LANE.map(([x, z]) => ({ x, z }));
+}
+
+export function inTown(x, z) {
+  return Math.hypot(x - TOWN.x, z - TOWN.z) <= TOWN.r;
+}
+
+export function townSpot(id) {
+  return TOWN.spots[id] || null;
 }
 
 export function nearestZone(x, z) {
@@ -466,7 +518,8 @@ export function layoutProps(seed = 11) {
       for (let attempt = 0; attempt < 50; attempt += 1) {
         const x = BOUNDS.minX + 1 + rng.next() * (BOUNDS.maxX - BOUNDS.minX - 2);
         const z = BOUNDS.minZ + 1 + rng.next() * (BOUNDS.maxZ - BOUNDS.minZ - 2);
-        if (distanceToRoad(x, z) < minRoad) continue;
+        if (distanceToPaths(x, z) < minRoad) continue;
+        if (Math.hypot(x - TOWN.x, z - TOWN.z) < TOWN.r + 1.2) continue;
         if (taken.some((p) => Math.hypot(p.x - x, p.z - z) < sep)) continue;
         spot = { x, z, scale: scale[0] + rng.next() * (scale[1] - scale[0]), rot: rng.next() * Math.PI * 2 };
         break;

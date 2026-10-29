@@ -7,6 +7,7 @@ import { ENEMIES, isUnlocked } from "./enemies.js";
 import { getWeapon } from "./weapons.js";
 import { isLowEndScreen } from "./graphics.js";
 import { EQUIP_SLOTS, getItem, meetsRequirements, requirementText } from "./items.js";
+import { SHOP_STOCK, coinCount, sellPrice, shopPrice } from "./economy.js";
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -47,6 +48,8 @@ export function mountUi(handlers) {
   const tabbar = document.getElementById("tabbar");
   const panelBody = document.getElementById("panel-body");
   let currentScreen = null;
+  const tradeRoot = document.getElementById("trade");
+  let confirmReset = false;
 
   /** Phone layout: one panel at a time under the view. Desktop CSS ignores the tab. */
   function setTab(name) {
@@ -154,9 +157,9 @@ export function mountUi(handlers) {
       });
       list.append(card);
     }
-    const reset = el("button", "linkish", "Abandon saved progress");
+    const reset = el("button", "linkish", "Reset save…");
     reset.type = "button";
-    reset.addEventListener("click", () => handlers.onReset());
+    reset.addEventListener("click", () => setSettingsOpen(true, true));
     selectScreen.append(list, reset);
   }
 
@@ -166,7 +169,7 @@ export function mountUi(handlers) {
       el(
         "p",
         "lede",
-        "The marsh road runs east: goblin camp, a farm, the town gate, then the wood. Tap the ground to walk, or tap a foe to fight. Drag to turn the view, scroll or pinch to zoom.",
+        "The marsh road runs east: goblin camp, a farm, the town gate, then the wood. The safe town with the bank and store lies just south of the campfire. Tap the ground to walk, or tap a foe to fight. Drag to turn the view, scroll or pinch to zoom.",
       ),
     );
     const weapon = getWeapon(model.weaponId);
@@ -182,6 +185,15 @@ export function mountUi(handlers) {
     selectScreen.append(el("p", "equipped", `Wielding ${weapon.name}.`), styles, el("p", "preview", model.preview));
     const list = el("div", "zone-list");
     zonesRoot?.replaceChildren(el("h2", "zones-title", "Zones · tap one to travel"), list);
+    if (model.town) {
+      const card = el("button", "zone-card town-card");
+      card.type = "button";
+      card.dataset.zone = "town";
+      if (model.town.here) card.classList.add("here");
+      card.append(el("strong", null, "Town"), el("small", null, "Safe · bank booth · general store"));
+      card.addEventListener("click", () => handlers.onTownGo?.("square"));
+      list.append(card);
+    }
     for (const zone of model.zones || []) {
       const card = el("button", "zone-card");
       card.type = "button";
@@ -197,9 +209,23 @@ export function mountUi(handlers) {
       card.addEventListener("click", () => handlers.onZone?.(zone.enemyId));
       list.append(card);
     }
-    const reset = el("button", "linkish", "Abandon saved progress");
+    if (model.town?.here && zonesRoot) {
+      const row = el("div", "town-actions");
+      for (const [id, label] of [
+        ["bank", "Use the bank"],
+        ["shop", "Visit the store"],
+      ]) {
+        const button = el("button", null, label);
+        button.type = "button";
+        button.dataset.town = id;
+        button.addEventListener("click", () => handlers.onTownGo?.(id));
+        row.append(button);
+      }
+      zonesRoot.append(row);
+    }
+    const reset = el("button", "linkish", "Reset save…");
     reset.type = "button";
-    reset.addEventListener("click", () => handlers.onReset());
+    reset.addEventListener("click", () => setSettingsOpen(true, true));
     const touch = el("p", "key-hint touch-hint", "On a phone: tap the ground to walk, tap a foe to fight. Drag one finger to turn and tilt, pinch to zoom, twist two fingers to turn.");
     const keys = el("p", "key-hint", "WASD or arrows walk. Q and E turn the camera. Right-drag looks. Click a foe to approach.");
     if (!zonesRoot) selectScreen.append(list);
@@ -401,7 +427,8 @@ export function mountUi(handlers) {
     result.append(card);
   }
 
-  function setSettingsOpen(open) {
+  function setSettingsOpen(open, askReset = false) {
+    confirmReset = Boolean(open && askReset);
     settingsPanel.hidden = !open;
     settingsToggle.setAttribute("aria-expanded", open ? "true" : "false");
     if (open) renderSettings();
@@ -437,7 +464,212 @@ export function mountUi(handlers) {
     const close = el("button", "ghost", "Close");
     close.type = "button";
     close.addEventListener("click", () => setSettingsOpen(false));
-    settingsPanel.append(row, compare, close);
+    const saveBox = el("div", "save-box");
+    saveBox.append(el("h2", null, "Saved progress"));
+    if (!confirmReset) {
+      saveBox.append(el("p", null, "Skills, pack, gear, coins, bank, and where you stand save on this device as you play."));
+      const ask = el("button", "danger-outline", "Reset save…");
+      ask.type = "button";
+      ask.dataset.action = "reset-ask";
+      ask.addEventListener("click", () => {
+        confirmReset = true;
+        renderSettings();
+      });
+      saveBox.append(ask);
+    } else {
+      saveBox.classList.add("confirming");
+      saveBox.append(el("p", "settings-note", "Wipe every skill, item, coin, and banked stack and start again at the campfire? This cannot be undone. Graphics stay as they are."));
+      const yes = el("button", "danger", "Yes, wipe my save");
+      yes.type = "button";
+      yes.dataset.action = "reset-confirm";
+      yes.addEventListener("click", () => {
+        confirmReset = false;
+        setSettingsOpen(false);
+        handlers.onReset();
+      });
+      const no = el("button", "ghost", "Keep my progress");
+      no.type = "button";
+      no.dataset.action = "reset-cancel";
+      no.addEventListener("click", () => {
+        confirmReset = false;
+        renderSettings();
+      });
+      const pair = el("div", "graphics-row");
+      pair.append(yes, no);
+      saveBox.append(pair);
+    }
+    settingsPanel.append(row, compare, saveBox, close);
+  }
+
+  /** Bank and store sheet. A bottom drawer with tabs on phones, two columns on desktop. */
+  function renderTrade(model) {
+    if (!tradeRoot) return;
+    if (!model) {
+      tradeRoot.hidden = true;
+      tradeRoot.replaceChildren();
+      document.body.classList.remove("trade-open");
+      return;
+    }
+    const bank = model.kind === "bank";
+    tradeRoot.hidden = false;
+    tradeRoot.dataset.kind = model.kind;
+    tradeRoot.dataset.tab = model.tab;
+    tradeRoot.setAttribute("aria-label", bank ? "Bank" : "General store");
+    document.body.classList.add("trade-open");
+    tradeRoot.replaceChildren();
+    const sheet = el("div", "trade-sheet");
+    const head = el("header", "trade-head");
+    const titles = el("div");
+    titles.append(el("h2", null, bank ? "Bank of Duskmire" : "Duskmire general store"), el("small", "trade-coins", `${coinCount(model.inventory)} coins in your pack`));
+    const close = el("button", "trade-close", "Close");
+    close.type = "button";
+    close.addEventListener("click", () => handlers.onTradeClose?.());
+    head.append(titles, close);
+    const tabs = el("div", "trade-tabs");
+    tabs.setAttribute("role", "tablist");
+    const tabDefs = bank
+      ? [
+          ["bank", `Bank (${model.bank.length})`],
+          ["pack", "Pack"],
+        ]
+      : [
+          ["buy", "Buy"],
+          ["sell", "Sell"],
+        ];
+    for (const [id, label] of tabDefs) {
+      const button = el("button", null, label);
+      button.type = "button";
+      button.setAttribute("role", "tab");
+      button.dataset.tab = id;
+      button.setAttribute("aria-selected", model.tab === id ? "true" : "false");
+      button.addEventListener("click", () => handlers.onTradeTab?.(id));
+      tabs.append(button);
+    }
+    const cols = el("div", "trade-cols");
+    const left = el("section", "trade-col");
+    left.dataset.col = bank ? "bank" : "buy";
+    const right = el("section", "trade-col");
+    right.dataset.col = bank ? "pack" : "sell";
+    const message = el("p", "trade-msg", model.message || "");
+    message.setAttribute("aria-live", "polite");
+
+    if (bank) {
+      left.append(el("h3", null, "In the bank"));
+      const grid = el("div", "trade-grid");
+      model.bank.forEach((row, index) => {
+        const item = getItem(row.itemId);
+        const button = el("button", "trade-slot");
+        button.type = "button";
+        button.dataset.item = row.itemId;
+        if (model.selected?.from === "bank" && model.selected.index === index) button.classList.add("selected");
+        button.append(el("strong", null, item?.name || row.itemId), el("small", null, `×${row.qty}`));
+        button.addEventListener("click", () => handlers.onTradeSelect?.("bank", index));
+        grid.append(button);
+      });
+      if (!model.bank.length) grid.append(el("p", "pack-note", "Nothing banked yet. Deposit from your pack."));
+      left.append(grid);
+      const sel = model.selected?.from === "bank" ? model.bank[model.selected.index] : null;
+      const acts = el("div", "trade-actions");
+      if (sel) {
+        const name = getItem(sel.itemId)?.name || sel.itemId;
+        for (const [qty, label] of [
+          [1, "Withdraw 1"],
+          [10, "Withdraw 10"],
+          [Infinity, `Withdraw all (${sel.qty})`],
+        ]) {
+          if (qty === 10 && sel.qty <= 10) continue;
+          if (qty === 1 && sel.qty === 1) continue;
+          const button = el("button", null, label);
+          button.type = "button";
+          button.dataset.action = qty === Infinity ? "withdraw-all" : `withdraw-${qty}`;
+          button.addEventListener("click", () => handlers.onWithdraw?.(model.selected.index, qty));
+          acts.append(button);
+        }
+        acts.append(el("p", "pack-note", `${name} — tap a button to take it out.`));
+      } else if (model.bank.length) acts.append(el("p", "pack-note", "Tap a stack to withdraw it."));
+      left.append(acts);
+    } else {
+      left.append(el("h3", null, "For sale"));
+      const list = el("div", "shop-list");
+      const coins = coinCount(model.inventory);
+      for (const id of SHOP_STOCK) {
+        const item = getItem(id);
+        const price = shopPrice(id);
+        const row = el("div", "shop-row");
+        const info = el("div");
+        const req = requirementText(item);
+        info.append(el("strong", null, item.name), el("small", null, req ? `Needs ${req}` : item.blurb || ""));
+        const buy = el("button", null, `${price} gp`);
+        buy.type = "button";
+        buy.dataset.buy = id;
+        buy.setAttribute("aria-label", `Buy ${item.name} for ${price} coins`);
+        buy.disabled = coins < price;
+        buy.addEventListener("click", () => handlers.onBuy?.(id));
+        row.append(info, buy);
+        list.append(row);
+      }
+      left.append(list);
+    }
+
+    right.append(el("h3", null, bank ? "Your pack" : "Sell from your pack"));
+    const grid = el("div", "trade-grid inv");
+    (model.inventory || []).forEach((raw, index) => {
+      const item = raw ? getItem(raw.itemId) : null;
+      const button = el("button", "trade-slot");
+      button.type = "button";
+      if (!item) {
+        button.disabled = true;
+        button.classList.add("empty");
+      } else {
+        button.dataset.item = raw.itemId;
+        if (model.selected?.from === "pack" && model.selected.index === index) button.classList.add("selected");
+        const price = sellPrice(raw.itemId);
+        button.append(el("strong", null, item.name), el("small", null, raw.qty > 1 ? `×${raw.qty}` : bank ? "" : price ? `${price} gp` : ""));
+        button.addEventListener("click", () => handlers.onTradeSelect?.("pack", index));
+      }
+      grid.append(button);
+    });
+    right.append(grid);
+    const acts = el("div", "trade-actions");
+    const selRaw = model.selected?.from === "pack" ? model.inventory[model.selected.index] : null;
+    const selItem = selRaw ? getItem(selRaw.itemId) : null;
+    if (bank) {
+      if (selItem) {
+        const one = el("button", null, selRaw.qty > 1 ? `Deposit ${selRaw.qty}` : "Deposit 1");
+        one.type = "button";
+        one.dataset.action = "deposit-one";
+        one.addEventListener("click", () => handlers.onDeposit?.(model.selected.index, "one"));
+        acts.append(one);
+        const same = model.inventory.filter((slot) => slot && slot.itemId === selRaw.itemId).length;
+        if (same > 1) {
+          const all = el("button", null, `Deposit all ${same}`);
+          all.type = "button";
+          all.dataset.action = "deposit-kind";
+          all.addEventListener("click", () => handlers.onDeposit?.(model.selected.index, "all"));
+          acts.append(all);
+        }
+      }
+      const everything = el("button", "deposit-all", "Deposit all");
+      everything.type = "button";
+      everything.dataset.action = "deposit-all";
+      everything.disabled = !(model.inventory || []).some(Boolean);
+      everything.addEventListener("click", () => handlers.onDepositAll?.());
+      acts.append(everything);
+    } else if (selItem) {
+      const price = sellPrice(selRaw.itemId);
+      const sell = el("button", null, price ? `Sell ${selItem.name} · ${price * selRaw.qty} gp` : "The store will not buy coins");
+      sell.type = "button";
+      sell.dataset.action = "sell";
+      sell.disabled = !price;
+      sell.addEventListener("click", () => handlers.onSell?.(model.selected.index));
+      acts.append(sell);
+    } else {
+      acts.append(el("p", "pack-note", "Tap an item to see what the store pays. Worn gear must come off first."));
+    }
+    right.append(acts);
+    cols.append(left, right);
+    sheet.append(head, tabs, message, cols);
+    tradeRoot.append(sheet);
   }
 
   settingsToggle.addEventListener("click", () => setSettingsOpen(settingsPanel.hidden));
@@ -446,6 +678,7 @@ export function mountUi(handlers) {
   });
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !settingsPanel.hidden) setSettingsOpen(false);
+    else if (event.key === "Escape" && tradeRoot && !tradeRoot.hidden) handlers.onTradeClose?.();
   });
 
   function setGraphics(graphics, compare) {
@@ -463,6 +696,7 @@ export function mountUi(handlers) {
     renderWorld,
     renderFightChrome,
     renderPack,
+    renderTrade,
     setGraphics,
     setPlates,
     appendLog,

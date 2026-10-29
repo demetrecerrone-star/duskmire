@@ -296,6 +296,34 @@ export function createMan() {
   return body;
 }
 
+/** Townsfolk for the safe square: the banker in moss green, the shopkeeper in an ochre apron. */
+export function createTownsfolk(role) {
+  const banker = role === "bank";
+  const body = createBody({
+    skin: banker ? colors.skin : colors.skinDeep,
+    tunic: banker ? colors.mossDeep : colors.tunicDark,
+    pants: colors.pants,
+    boots: colors.boots,
+    hair: banker ? colors.hair : colors.hairMan,
+    head: 0.2,
+    hem: 0.26,
+    belt: false,
+  });
+  const trimMat = material(banker ? colors.ochre : colors.scarf, { roughness: 0.66, texture: "cloth" });
+  body.materials.push(trimMat);
+  if (banker) {
+    const collar = add(body.group, torus(0.14, 0.03), trimMat, 0, 1.2, 0, body.materials);
+    collar.rotation.x = Math.PI / 2;
+    const hat = add(body.group, lathe([[0.02, 0.2], [0.2, 0.17], [0.22, 0.02], [0.3, 0]]), body.materials[1], 0, 1.4, 0, body.materials);
+    hat.castShadow = true;
+  } else {
+    const apron = add(body.group, rounded(0.3, 0.46, 0.05), trimMat, 0, 0.72, 0.19, body.materials);
+    apron.castShadow = true;
+  }
+  body.group.userData.arm.rotation.x = -0.3;
+  return body;
+}
+
 export function createGuard() {
   const body = createBody({
     skin: colors.skin,

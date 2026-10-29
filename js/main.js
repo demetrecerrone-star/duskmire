@@ -13,6 +13,7 @@ import { mountScene } from "./scene.js";
 import { formatPreview, mountUi } from "./ui.js";
 import {
   START,
+  TOWN,
   ZONES,
   applyDown,
   createSpawns,
@@ -20,6 +21,7 @@ import {
   stepRegen,
 } from "./nav.js";
 import { mountOverworld } from "./overworld.js";
+import { bankDeposit, bankDepositAll, bankWithdraw, buyItem, sellAt } from "./economy.js";
 import {
   armourBonuses,
   bonusTotals,
@@ -57,7 +59,10 @@ const state = {
   equipment: save.equipment || kit.equipment,
   selectedIndex: null,
   weaponId: weaponIdFromEquipment(save.equipment),
-  styleId: "accurate",
+  styleId: typeof save.styleId === "string" ? save.styleId : "accurate",
+  bank: Array.isArray(save.bank) ? save.bank : [],
+  trade: null,
+  inTown: false,
   enemyId: "goblin",
   spawnId: null,
   screen: "world",
@@ -90,7 +95,65 @@ const ui = mountUi({
   onStyle: (id) => {
     if (state.busy) return;
     state.styleId = id;
+    persist();
     refresh();
+  },
+  onTownGo: (id) => {
+    if (state.screen !== "world" || !world) return;
+    if (id === "square") {
+      ui.showHint("Off to town: a safe square with a bank booth and a general store.");
+      world.walkToTownSquare();
+      return;
+    }
+    world.walkToTown(id);
+  },
+  onTradeClose: () => closeTrade(),
+  onTradeTab: (tab) => {
+    if (!state.trade) return;
+    state.trade.tab = tab;
+    state.trade.selected = null;
+    renderTrade();
+  },
+  onTradeSelect: (from, index) => {
+    if (!state.trade) return;
+    state.trade.selected = { from, index };
+    renderTrade();
+  },
+  onDeposit: (index, mode) => {
+    if (!tradeReady("bank")) return;
+    const result = bankDeposit(state.inventory, state.bank, index, mode);
+    if (!result.ok) return tradeNote(result.reason === "bank-full" ? "The bank has no room for another kind of item." : "Nothing there to deposit.");
+    commitTrade(result, `You deposit ${result.moved} ${nameOf(result.itemId, result.moved)}.`);
+  },
+  onDepositAll: () => {
+    if (!tradeReady("bank")) return;
+    const result = bankDepositAll(state.inventory, state.bank);
+    if (!result.ok) return tradeNote(result.reason === "bank-full" ? "The bank is full." : "Your pack is already empty.");
+    commitTrade(result, result.kept ? "You deposit what the bank can hold." : "You empty your pack into the bank.");
+  },
+  onWithdraw: (bankIndex, qty) => {
+    if (!tradeReady("bank")) return;
+    const result = bankWithdraw(state.inventory, state.bank, bankIndex, qty);
+    if (!result.ok) return tradeNote(result.reason === "full" ? "Your inventory is full." : "That stack is gone.");
+    commitTrade(
+      result,
+      `You withdraw ${result.taken} ${nameOf(result.itemId, result.taken)}.${result.partial ? " Your pack is full." : ""}`,
+    );
+  },
+  onBuy: (itemId) => {
+    if (!tradeReady("shop")) return;
+    const result = buyItem(state.inventory, itemId, 1);
+    if (!result.ok) {
+      const hint = result.reason === "coins" ? `You need ${result.cost} coins for that.` : result.reason === "full" ? "Your inventory is full." : "The store does not stock that.";
+      return tradeNote(hint);
+    }
+    commitTrade(result, `You buy the ${result.item.name.toLowerCase()} for ${result.cost} coins.`);
+  },
+  onSell: (index) => {
+    if (!tradeReady("shop")) return;
+    const result = sellAt(state.inventory, index);
+    if (!result.ok) return tradeNote(result.reason === "unsellable" ? "The store will not buy that." : "Nothing there to sell.");
+    commitTrade(result, `You sell the ${result.item.name.toLowerCase()} for ${result.gained} coins.`);
   },
   onSelectItem: (index) => {
     if (state.busy) return;
@@ -189,6 +252,9 @@ const ui = mountUi({
     state.player = playerFromSave(fresh);
     state.weaponId = "sword";
     state.styleId = "accurate";
+    state.bank = [];
+    state.trade = null;
+    ui.renderTrade(null);
     state.enemyId = "goblin";
     state.spawnId = null;
     state.selectedIndex = null;
@@ -216,11 +282,61 @@ const ui = mountUi({
       scene?.setGear(gearView(state.equipment));
     }
     ui.hideResult();
-    ui.showHint("");
     ui.showNameplate(null);
+    writeSave(state.save);
+    ui.showHint("Save reset. A fresh start at the campfire.");
     refresh();
   },
 });
+
+function nameOf(itemId, qty) {
+  const name = (getItem(itemId)?.name || "items").toLowerCase();
+  return qty > 1 && !name.endsWith("s") && itemId !== "bread" ? `${name}s` : name;
+}
+
+function openTrade(kind) {
+  if (state.screen !== "world") return;
+  state.trade = { kind, tab: kind === "bank" ? "bank" : "buy", selected: null, message: "" };
+  state.trade.message = kind === "bank" ? "The banker nods. Your stacks are safe here." : "\"Bronze for beginners, fair coin for your loot.\"";
+  ui.showNameplate(null);
+  renderTrade();
+}
+
+function closeTrade() {
+  state.trade = null;
+  ui.renderTrade(null);
+}
+
+/** Only trade while standing at the counter; walking off closes the sheet. */
+function tradeReady(kind) {
+  if (!state.trade || state.trade.kind !== kind || state.screen !== "world" || state.busy) return false;
+  return true;
+}
+
+function tradeNote(text) {
+  if (!state.trade) return;
+  state.trade.message = text;
+  renderTrade();
+}
+
+function commitTrade(result, text) {
+  state.inventory = result.inventory;
+  if (result.bank) state.bank = result.bank;
+  state.selectedIndex = null;
+  if (state.trade) {
+    state.trade.message = text;
+    const sel = state.trade.selected;
+    if (sel?.from === "bank" && !state.bank[sel.index]) state.trade.selected = null;
+    if (sel?.from === "pack" && !state.inventory[sel.index]) state.trade.selected = null;
+  }
+  persist();
+  refresh();
+}
+
+function renderTrade() {
+  if (!state.trade) return ui.renderTrade(null);
+  ui.renderTrade({ ...state.trade, inventory: state.inventory, bank: state.bank, skills: state.player.skills });
+}
 
 function ensureStyle() {
   const weapon = getWeapon(state.weaponId);
@@ -305,10 +421,16 @@ function plates() {
     };
   }
   if (state.screen === "world" && world) {
+    const hp = Math.max(0, Math.floor(state.player.hp));
+    if (state.inTown) {
+      return {
+        player: { name: "You", hp: state.player.hp, max: state.player.maxHp, detail: `${hp} / ${state.player.maxHp}` },
+        enemy: { name: TOWN.name, hp: 1, max: 1, detail: "Safe" },
+      };
+    }
     const zone = world.nearestZone();
     const foe = getEnemy(zone.enemyId);
     const open = isUnlocked(foe, state.save.defeated);
-    const hp = Math.max(0, Math.floor(state.player.hp));
     return {
       player: {
         name: "You",
@@ -345,6 +467,8 @@ function stampWorld() {
   state.save.xp = { ...state.player.xp };
   state.save.inventory = state.inventory;
   state.save.equipment = state.equipment;
+  state.save.bank = state.bank;
+  state.save.styleId = state.styleId;
   if (!state.worldReady || !world) return;
   const pos = world.getPosition();
   state.save.x = Math.round(pos.x * 100) / 100;
@@ -359,6 +483,8 @@ function stampWorld() {
 }
 
 function persist() {
+  state.save.bank = state.bank;
+  state.save.styleId = state.styleId;
   state.save.inventory = state.inventory;
   state.save.equipment = state.equipment;
   state.save.weaponId = state.weaponId;
@@ -381,6 +507,7 @@ function refresh() {
     over: Boolean(state.fight?.over),
     enemyName: getEnemy(state.enemyId).name,
     zones: state.screen === "world" ? zoneModel() : [],
+    town: state.screen === "world" && world ? { here: state.inTown } : null,
     inventory: state.inventory,
     equipment: state.equipment,
     bonuses: bonusTotals(state.equipment),
@@ -389,6 +516,7 @@ function refresh() {
     screen: state.screen,
   };
   ui.renderPack(model);
+  if (state.trade) renderTrade();
   if (state.screen === "world") ui.renderWorld(model);
   else if (state.screen === "select") ui.renderSelect(model);
   else ui.renderFightChrome(model);
@@ -471,6 +599,7 @@ async function eatInFight(index) {
   state.selectedIndex = null;
   state.fight.player.hp = eaten.hp;
   state.player.hp = Math.min(state.player.maxHp, eaten.hp);
+  persist();
   ui.appendLog(
     eaten.healed
       ? `You eat the ${eaten.item.name.toLowerCase()} and heal ${eaten.healed}.`
@@ -569,6 +698,16 @@ function finishFight() {
 
 function onRoadStep(dt) {
   if (state.screen !== "world") return;
+  const here = Boolean(world?.inTown());
+  if (here !== state.inTown) {
+    state.inTown = here;
+    refresh();
+  }
+  if (state.trade && world) {
+    const spot = TOWN.spots[state.trade.kind];
+    const pos = world.getPosition();
+    if (Math.hypot(spot.x - pos.x, spot.z - pos.z) > 2.2) closeTrade();
+  }
   const next = stepRegen(state.player.hp, state.player.maxHp, dt, state.regenAcc);
   state.regenAcc = next.acc;
   if (next.hp !== state.player.hp) {
@@ -629,10 +768,12 @@ try {
     getDefeated: () => state.save.defeated,
     onEngage: (spawn) => {
       if (state.screen !== "world" || state.busy) return;
+      closeTrade();
       state.spawnId = spawn.id;
       state.enemyId = spawn.enemyId;
       startFight({ fromRoad: true });
     },
+    onTown: (id) => openTrade(id),
     onHint: (text) => ui.showHint(text),
     onHover: (info) => ui.showNameplate(info),
     onPickup: (pile) => {
@@ -653,6 +794,7 @@ try {
   });
   state.worldReady = true;
   state.screen = "world";
+  state.inTown = world.inTown();
   if (params.has("debug")) {
     // Read-only peek for automated touch tests: where foes stand on screen and how the camera sits.
     window.duskmireDebug = {
@@ -660,6 +802,10 @@ try {
       camera: () => world.getCamera(),
       screen: () => state.screen,
       render: () => ({ ...scene.renderer.info.render, pixelRatio: scene.renderer.getPixelRatio() }),
+      town: (id) => world.screenOfTown(id),
+      position: () => world.getPosition(),
+      inTown: () => world.inTown(),
+      trade: () => (state.trade ? { kind: state.trade.kind, tab: state.trade.tab } : null),
     };
   }
 } catch (error) {

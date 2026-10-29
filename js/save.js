@@ -4,8 +4,10 @@
 import { SKILLS, xpForLevel } from "./skills.js";
 import { createPlayer, createPlayerFromXp } from "./entities.js";
 import { migrateSave, starterState } from "./items.js";
+import { sanitizeBank } from "./economy.js";
 
-const KEY = "duskmire-save-v1";
+export const SAVE_KEY = "duskmire-save-v1";
+const KEY = SAVE_KEY;
 
 export function freshSave() {
   const player = createPlayer();
@@ -18,6 +20,7 @@ export function freshSave() {
     inventory: kit.inventory,
     equipment: kit.equipment,
     loot: [],
+    bank: [],
   };
 }
 
@@ -39,7 +42,10 @@ export function loadSave() {
     const data = JSON.parse(raw);
     if (!valid(data)) return freshSave();
     if (data.xp.hitpoints < xpForLevel(10)) data.xp.hitpoints = xpForLevel(10);
-    return migrateSave(data);
+    const next = migrateSave(data);
+    next.bank = sanitizeBank(data.bank);
+    if (typeof next.styleId !== "string") delete next.styleId;
+    return next;
   } catch {
     return freshSave();
   }

@@ -30,7 +30,7 @@ import {
   Vector3,
 } from "../vendor/three.module.js";
 import { palette } from "./palette.js";
-import { createAdventurer, createCharacter, createWeapon, dressAdventurer } from "./models.js";
+import { createAdventurer, createCharacter, createTownsfolk, createWeapon, dressAdventurer } from "./models.js";
 import { createLathe, createRoundedBox } from "./geometries.js";
 import { isDetailed, isNarrowScreen, pixelRatioCap, profile, setBuildQuality, shadowMapSize } from "./quality.js";
 import { applyMaps, stampAoUv } from "./textures.js";
@@ -42,6 +42,7 @@ import {
   ENCOUNTER_RANGE,
   OBSTACLES,
   START,
+  TOWN,
   WALK_SPEED,
   ZONES,
   approachPoint,
@@ -49,13 +50,17 @@ import {
   createSpawns,
   createWorldGrid,
   defeatSpawn,
-  distanceToRoad,
+  distanceToPaths,
+  distanceToTownPaving,
   findPath,
+  inTown,
   layoutProps,
   moveWithCollision,
   nearestZone,
   reviveSpawns,
   roadPoints,
+  townLanePoints,
+  townSpot,
   stepWander,
   zoneByEnemy,
 } from "./nav.js";
@@ -71,7 +76,7 @@ function smoothstep(edge0, edge1, x) {
 }
 
 export function groundY(x, z) {
-  const road = smoothstep(0.25, 2.8, distanceToRoad(x, z));
+  const road = smoothstep(0.25, 2.8, distanceToPaths(x, z));
   const wave = Math.sin(x * 0.16) * Math.cos(z * 0.21) * 0.4 + Math.sin((x + z) * 0.08) * 0.16;
   return wave * road;
 }
@@ -112,6 +117,8 @@ export function mountOverworld(canvas, renderer, options = {}) {
   let path = [];
   let pendingEngage = null;
   let pendingLoot = null;
+  let pendingTown = null;
+  let hoverTown = null;
   let repathAt = 0;
   let hoverId = null;
   let hoverLootId = null;
@@ -217,6 +224,7 @@ export function mountOverworld(canvas, renderer, options = {}) {
       path = [];
       pendingEngage = null;
       pendingLoot = null;
+      pendingTown = null;
       const len = Math.hypot(stepX, stepZ);
       const scale = (WALK_SPEED * dt) / len;
       const next = moveWithCollision(grid, pos.x, pos.z, stepX * scale, stepZ * scale);
@@ -282,6 +290,23 @@ export function mountOverworld(canvas, renderer, options = {}) {
         }
       }
     }
+    if (pendingTown) {
+      const spot = townSpot(pendingTown);
+      const dist = spot ? Math.hypot(spot.x - pos.x, spot.z - pos.z) : Infinity;
+      if (!spot) pendingTown = null;
+      else if (dist <= 0.75 || (!path.length && dist <= 1.4)) {
+        const id = pendingTown;
+        pendingTown = null;
+        path = [];
+        moving = false;
+        facing = Math.atan2(spot.npcX - pos.x, spot.npcZ - pos.z);
+        options.onTown?.(id);
+      } else if (!path.length && now >= repathAt) {
+        path = findPath(grid, pos, spot);
+        repathAt = now + 450;
+        if (!path.length) pendingTown = null;
+      }
+    }
     options.onStep?.(dt);
   }
 
@@ -323,6 +348,15 @@ export function mountOverworld(canvas, renderer, options = {}) {
       const item = getItem(hoverPile.itemId);
       const qty = hoverPile.qty > 1 ? ` × ${hoverPile.qty}` : "";
       options.onHover?.({ text: `${item?.name || "Loot"}${qty}`, x: spot.x, y: spot.y });
+      return;
+    }
+    const townHover = hoverTown && townSpot(hoverTown);
+    if (townHover) {
+      const primary = layoutRects[0];
+      const view = views.get(primary.quality);
+      if (!view) return;
+      const spot = project(view, townHover.npcX, groundY(townHover.npcX, townHover.npcZ) + 2.1, townHover.npcZ, primary);
+      options.onHover?.({ text: hoverTown === "bank" ? "Bank booth · tap to bank" : "General store · tap to trade", x: spot.x, y: spot.y });
       return;
     }
     const hover = spawnById(hoverId);
@@ -382,6 +416,8 @@ export function mountOverworld(canvas, renderer, options = {}) {
     if (enemyHits[0]?.object?.userData?.spawnId) {
       return { spawn: spawnById(enemyHits[0].object.userData.spawnId) };
     }
+    const townHits = raycaster.intersectObjects(view.townPicks || [], false);
+    if (townHits[0]?.object?.userData?.townId) return { town: townHits[0].object.userData.townId };
     if (slop > 0) {
       // A fingertip is wider than a far-off goblin: take the nearest standing foe under it.
       let best = null;
@@ -401,9 +437,19 @@ export function mountOverworld(canvas, renderer, options = {}) {
         }
       }
       if (best) return { spawn: best };
+      for (const id of ["bank", "shop"]) {
+        const spot = townSpot(id);
+        const at = project(view, spot.npcX, groundY(spot.npcX, spot.npcZ) + 1.0, spot.npcZ, chosen);
+        if (aim.z <= 1 && Math.hypot(at.x - x, at.y - y) < slop * 1.4) return { town: id };
+      }
     }
     const groundHits = raycaster.intersectObject(view.ground, false);
-    if (groundHits[0]) return { point: { x: groundHits[0].point.x, z: groundHits[0].point.z } };
+    if (groundHits[0]) {
+      const inset = 0.6;
+      const px = Math.min(BOUNDS.maxX - inset, Math.max(BOUNDS.minX + inset, groundHits[0].point.x));
+      const pz = Math.min(BOUNDS.maxZ - inset, Math.max(BOUNDS.minZ + inset, groundHits[0].point.z));
+      return { point: { x: px, z: pz } };
+    }
     return null;
   }
 
@@ -420,6 +466,22 @@ export function mountOverworld(canvas, renderer, options = {}) {
     path = findPath(grid, pos, goal);
   }
 
+  function walkToTown(id) {
+    const spot = townSpot(id);
+    if (!spot) return;
+    pendingEngage = null;
+    pendingLoot = null;
+    if (Math.hypot(spot.x - pos.x, spot.z - pos.z) <= 0.75) {
+      pendingTown = null;
+      path = [];
+      options.onTown?.(id);
+      return;
+    }
+    pendingTown = id;
+    path = findPath(grid, pos, spot);
+    repathAt = Date.now() + 450;
+  }
+
   function walkTo(x, z, engageId) {
     const goal = engageId ? approachPoint(pos, { x, z }, ENCOUNTER_RANGE * 0.75) : { x, z };
     if (engageId && Math.hypot(x - pos.x, z - pos.z) <= ENCOUNTER_RANGE) {
@@ -433,6 +495,7 @@ export function mountOverworld(canvas, renderer, options = {}) {
     }
     path = findPath(grid, pos, goal);
     pendingEngage = engageId || null;
+    pendingTown = null;
     if (!path.length && !pendingEngage) options.onHint?.("The marsh will not let you through there.");
   }
 
@@ -460,6 +523,15 @@ export function mountOverworld(canvas, renderer, options = {}) {
       else ctx.lineTo(px, py);
     });
     ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    townLanePoints().forEach((point, index) => {
+      if (index === 0) ctx.moveTo(mapX(point.x), mapZ(point.z));
+      else ctx.lineTo(mapX(point.x), mapZ(point.z));
+    });
+    ctx.stroke();
+    ctx.fillStyle = "#d9cbb0";
+    ctx.fillRect(mapX(TOWN.x) - 4, mapZ(TOWN.z) - 4, 8, 8);
     for (const zone of ZONES) {
       ctx.fillStyle = isUnlocked(getEnemy(zone.enemyId), getDefeated()) ? "#8ea06e" : "#7d776c";
       ctx.beginPath();
@@ -580,6 +652,7 @@ export function mountOverworld(canvas, renderer, options = {}) {
     const hit = pick(event);
     hoverId = hit?.spawn?.id || null;
     hoverLootId = hit?.loot?.id || null;
+    hoverTown = hit?.town || null;
   });
   function endPointer(event) {
     pointers.delete(event.pointerId);
@@ -591,6 +664,10 @@ export function mountOverworld(canvas, renderer, options = {}) {
     const hit = pick(event, event.pointerType === "mouse" ? 0 : TOUCH_PICK_SLOP);
     if (hit?.loot) {
       walkToLoot(hit.loot);
+      return;
+    }
+    if (hit?.town) {
+      walkToTown(hit.town);
       return;
     }
     if (hit?.spawn) {
@@ -616,6 +693,8 @@ export function mountOverworld(canvas, renderer, options = {}) {
         path = [];
         pendingEngage = null;
         pendingLoot = null;
+        pendingTown = null;
+        hoverTown = null;
         options.onHover?.(null);
       } else {
         last = performance.now();
@@ -650,6 +729,7 @@ export function mountOverworld(canvas, renderer, options = {}) {
       path = [];
       pendingEngage = null;
       pendingLoot = null;
+      pendingTown = null;
     },
     getPosition() {
       return { x: pos.x, z: pos.z };
@@ -671,6 +751,27 @@ export function mountOverworld(canvas, renderer, options = {}) {
     },
     nearestZone() {
       return nearestZone(pos.x, pos.z);
+    },
+    /** Walk to the bank booth ("bank") or the shop counter ("shop"); onTown fires on arrival. */
+    walkToTown,
+    walkToTownSquare() {
+      pendingEngage = null;
+      pendingLoot = null;
+      pendingTown = null;
+      path = findPath(grid, pos, { x: TOWN.x, z: TOWN.z - 0.6 });
+    },
+    inTown() {
+      return inTown(pos.x, pos.z);
+    },
+    /** Where a townsperson stands on screen, in page CSS pixels (used by the tests). */
+    screenOfTown(id) {
+      const spot = townSpot(id);
+      const primary = layoutRects[0];
+      const view = primary && views.get(primary.quality);
+      if (!spot || !view) return null;
+      const bounds = canvas.getBoundingClientRect();
+      const at = project(view, spot.npcX, groundY(spot.npcX, spot.npcZ) + 1.0, spot.npcZ, primary);
+      return { x: bounds.left + at.x, y: bounds.top + at.y, inside: at.x >= 0 && at.y >= 0 && at.x <= bounds.width && at.y <= bounds.height };
     },
     /** Where a foe stands on screen, in page CSS pixels (used by the touch tests). */
     screenOf(spawnId) {
@@ -739,6 +840,7 @@ function buildView(qualityId, spawns, props, weaponId, gearSpec) {
   scene.add(ground);
   const dressing = new Group();
   dressing.add(buildTrees(props.trees, detailed));
+  dressing.add(buildTrees(borderTreeSpots(), detailed, true));
   dressing.add(buildRocks(props.rocks, detailed));
   if (detailed) dressing.add(buildGrass(props.grass.slice(0, narrow ? 70 : 150), detailed));
   dressing.add(buildFences(props.fences));
@@ -772,6 +874,20 @@ function buildView(qualityId, spawns, props, weaponId, gearSpec) {
     actor.group.userData.lockRing = ring;
     scene.add(actor.group);
     actors.push({ spawn, actor, ring });
+  }
+
+  const townPicks = [];
+  for (const id of ["bank", "shop"]) {
+    const spot = townSpot(id);
+    const folk = createTownsfolk(id);
+    folk.group.position.set(spot.npcX, groundY(spot.npcX, spot.npcZ), spot.npcZ);
+    folk.group.rotation.y = Math.atan2(spot.x - spot.npcX, spot.z - spot.npcZ);
+    scene.add(folk.group);
+    const pick = new Mesh(new CylinderGeometry(1.0, 1.0, 2.2, 10), pickMat);
+    pick.position.set((spot.npcX + spot.x) / 2 + 0.3, groundY(spot.npcX, spot.npcZ) + 1.1, spot.npcZ);
+    pick.userData.townId = id;
+    scene.add(pick);
+    townPicks.push(pick);
   }
 
   const lootGroup = new Group();
@@ -830,6 +946,7 @@ function buildView(qualityId, spawns, props, weaponId, gearSpec) {
     ground,
     picks,
     lootPicks,
+    townPicks,
     exposure: spec.exposure,
     builtNarrow: narrow,
     setWeapon,
@@ -961,14 +1078,23 @@ function buildSky(detailed) {
   return new Mesh(geo, new MeshBasicMaterial({ vertexColors: true, side: BackSide, depthWrite: false }));
 }
 
+/** How far the drawn ground runs past the walkable edge, so the map never ends in a cliff of fog. */
+const GROUND_SKIRT = 14;
+
+function outsideBounds(x, z) {
+  const dx = Math.max(BOUNDS.minX - x, 0, x - BOUNDS.maxX);
+  const dz = Math.max(BOUNDS.minZ - z, 0, z - BOUNDS.maxZ);
+  return Math.hypot(dx, dz);
+}
+
 function buildGround(detailed) {
-  const width = BOUNDS.maxX - BOUNDS.minX;
-  const depth = BOUNDS.maxZ - BOUNDS.minZ;
-  const segX = detailed ? 90 : 48;
-  const segZ = detailed ? 42 : 24;
+  const width = BOUNDS.maxX - BOUNDS.minX + GROUND_SKIRT * 2;
+  const depth = BOUNDS.maxZ - BOUNDS.minZ + GROUND_SKIRT * 2;
+  const segX = detailed ? 112 : 60;
+  const segZ = detailed ? 64 : 36;
   const geo = new PlaneGeometry(width, depth, segX, segZ);
   geo.rotateX(-Math.PI / 2);
-  geo.translate(BOUNDS.minX + width / 2, 0, BOUNDS.minZ + depth / 2);
+  geo.translate(BOUNDS.minX - GROUND_SKIRT + width / 2, 0, BOUNDS.minZ - GROUND_SKIRT + depth / 2);
   const pos = geo.attributes.position;
   const color = new Float32Array(pos.count * 3);
   const moss = new Color(palette.moss);
@@ -979,16 +1105,21 @@ function buildGround(detailed) {
   for (let i = 0; i < pos.count; i += 1) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
-    pos.setY(i, groundY(x, z));
+    const out = outsideBounds(x, z);
+    pos.setY(i, groundY(x, z) + Math.min(out, 9) * 0.16 * smoothstep(0, 3, out));
     const zone = nearestZone(x, z);
     const tint = dirt.clone();
     if (zone.enemyId === "goblin") tint.lerp(moss, 0.55);
     else if (zone.enemyId === "man") tint.lerp(ochre, 0.28);
     else if (zone.enemyId === "guard") tint.lerp(stone, 0.35);
     else tint.lerp(mossDeep, 0.62);
-    const road = 1 - smoothstep(0.2, 2.2, distanceToRoad(x, z));
+    const road = 1 - smoothstep(0.2, 2.2, distanceToPaths(x, z));
     tint.lerp(ochre, road * 0.55);
     tint.lerp(dirt, road * 0.25);
+    // The town square is packed earth and flagstones rather than marsh.
+    const square = 1 - smoothstep(0, 1.4, distanceToTownPaving(x, z));
+    tint.lerp(stone, square * 0.4);
+    tint.lerp(mossDeep, smoothstep(0.5, 6, out) * 0.7);
     color[i * 3] = tint.r;
     color[i * 3 + 1] = tint.g;
     color[i * 3 + 2] = tint.b;
@@ -1012,7 +1143,7 @@ function instanceMesh(geometry, material, spots, yOffset, cast) {
   mesh.count = spots.length;
   spots.forEach((spot, index) => {
     const scale = spot.scale || 1;
-    dummy.position.set(spot.x, groundY(spot.x, spot.z) + yOffset * scale, spot.z);
+    dummy.position.set(spot.x, groundY(spot.x, spot.z) + (spot.y || 0) + yOffset * scale, spot.z);
     dummy.rotation.set(0, spot.rot || 0, 0);
     dummy.scale.set(scale, scale, scale);
     dummy.updateMatrix();
@@ -1024,9 +1155,31 @@ function instanceMesh(geometry, material, spots, yOffset, cast) {
   return mesh;
 }
 
-function buildTrees(spots, detailed) {
+/** A ring of trees on the rising ground past the edge of the walkable map. Visual only. */
+function borderTreeSpots() {
+  const rng = createRng(404);
+  const spots = [];
+  const push = (x, z) => {
+    if (outsideBounds(x, z) < 1.6) return;
+    spots.push({ x, z, scale: 0.95 + rng.next() * 0.6, rot: rng.next() * Math.PI * 2 });
+  };
+  for (const ring of [2.6, 6.2]) {
+    for (let x = BOUNDS.minX - ring; x <= BOUNDS.maxX + ring; x += 2.4) {
+      push(x + (rng.next() - 0.5) * 1.2, BOUNDS.minZ - ring + (rng.next() - 0.5) * 1.4);
+      push(x + (rng.next() - 0.5) * 1.2, BOUNDS.maxZ + ring + (rng.next() - 0.5) * 1.4);
+    }
+    for (let z = BOUNDS.minZ - ring + 2.4; z <= BOUNDS.maxZ + ring - 2.4; z += 2.4) {
+      push(BOUNDS.minX - ring + (rng.next() - 0.5) * 1.4, z + (rng.next() - 0.5) * 1.2);
+      push(BOUNDS.maxX + ring + (rng.next() - 0.5) * 1.4, z + (rng.next() - 0.5) * 1.2);
+    }
+  }
+  for (const spot of spots) spot.y = Math.min(outsideBounds(spot.x, spot.z), 9) * 0.16 * smoothstep(0, 3, outsideBounds(spot.x, spot.z));
+  return spots;
+}
+
+function buildTrees(spots, detailed, distant = false) {
   const group = new Group();
-  const segs = detailed ? [8, 14] : [5, 10];
+  const segs = distant ? [3, 6] : detailed ? [8, 14] : [5, 10];
   const bark = new MeshStandardMaterial({ color: palette.bark, roughness: 0.86 });
   const leaf = new MeshStandardMaterial({ color: palette.moss, roughness: 0.9 });
   if (detailed) {
@@ -1034,8 +1187,8 @@ function buildTrees(spots, detailed) {
     applyMaps(leaf, "cloth");
   }
   const trunk = new CapsuleGeometry(0.12, 0.9, segs[0], segs[1]);
-  const crown = new SphereGeometry(0.5, detailed ? 18 : 12, detailed ? 14 : 10);
-  group.add(instanceMesh(trunk, bark, spots, 0.62, !isNarrowScreen()));
+  const crown = distant ? new SphereGeometry(0.5, 10, 7) : new SphereGeometry(0.5, detailed ? 18 : 12, detailed ? 14 : 10);
+  group.add(instanceMesh(trunk, bark, spots, 0.62, !distant && !isNarrowScreen()));
   group.add(instanceMesh(crown, leaf, spots, 1.25, false));
   return group;
 }
@@ -1063,6 +1216,7 @@ function buildFences(spots) {
 function buildStructure(ob, detailed) {
   const group = new Group();
   group.position.set(ob.x, groundY(ob.x, ob.z), ob.z);
+  if (ob.rot) group.rotation.y = ob.rot;
   const wall = new MeshStandardMaterial({ color: palette.manShirt, roughness: 0.86 });
   const roofMat = new MeshStandardMaterial({ color: palette.barkDark, roughness: 0.8 });
   const stone = new MeshStandardMaterial({ color: palette.stone, roughness: 0.7, metalness: 0.08 });
@@ -1097,6 +1251,54 @@ function buildStructure(ob, detailed) {
     add(new SphereGeometry(0.45, 14, 10), roofMat, 0, 3.15, 0);
   } else if (ob.kind === "pillar") {
     add(new CapsuleGeometry(0.28, 1.8, 5, 12), stone, 0, 1.15, 0);
+  } else if (ob.kind === "bank") {
+    // Bank booth: a stone counter under a timber canopy, with a coin chest on top.
+    add(createRoundedBox(1.7, 0.95, 0.75, 3.4, detailed ? 24 : 14, detailed ? 12 : 8), stone, 0, 0.5, 0);
+    add(createRoundedBox(1.85, 0.12, 0.9, 3, 14, 8), roofMat, 0, 1.02, -0.02);
+    for (const side of [-0.85, 0.85]) add(new CapsuleGeometry(0.08, 1.35, 4, 8), roofMat, side, 1.55, 0.32);
+    const canopy = add(createRoundedBox(2.2, 0.1, 1.5, 8, 12, 6), cloth, 0, 2.3, 0.05);
+    canopy.rotation.x = -0.22;
+    const ridge = add(new CapsuleGeometry(0.06, 2.0, 4, 8), roofMat, 0, 2.48, 0.62);
+    ridge.rotation.z = Math.PI / 2;
+    const chest = new MeshStandardMaterial({ color: palette.ochre, roughness: 0.4, metalness: 0.45 });
+    add(createRoundedBox(0.42, 0.26, 0.3, 3, 12, 8), roofMat, -0.45, 1.22, 0);
+    add(new SphereGeometry(0.07, 10, 8), chest, -0.45, 1.27, -0.16);
+    for (let i = 0; i < 3; i += 1) add(new CylinderGeometry(0.07, 0.07, 0.03, 12), chest, 0.35 + i * 0.03, 1.1 + i * 0.035, -0.05);
+  } else if (ob.kind === "stall") {
+    // General store: a market stall with a striped awning and goods on the counter.
+    const awning = new MeshStandardMaterial({ color: 0x8c6a32, roughness: 0.88 });
+    if (detailed) applyMaps(awning, "cloth");
+    add(createRoundedBox(1.9, 0.85, 0.8, 3.4, detailed ? 24 : 14, detailed ? 12 : 8), roofMat, 0, 0.45, 0);
+    for (const side of [-0.92, 0.92]) add(new CapsuleGeometry(0.08, 1.35, 4, 8), roofMat, side, 1.5, 0.3);
+    const top = add(createRoundedBox(2.3, 0.1, 1.5, 8, 12, 6), awning, 0, 2.25, 0.05);
+    top.rotation.x = -0.24;
+    for (const x of [-0.75, 0, 0.75]) {
+      const stripe = add(createRoundedBox(0.3, 0.02, 1.48, 8, 6, 4), wall, x, 0.06, 0);
+      top.add(stripe);
+      stripe.position.set(x, 0.06, 0);
+    }
+    for (const [x, kind] of [[-0.6, "loaf"], [-0.15, "pot"], [0.35, "blade"], [0.7, "loaf"]]) {
+      if (kind === "loaf") add(new SphereGeometry(0.13, 10, 8), wall, x, 0.98, 0).scale.set(1.3, 0.7, 1);
+      else if (kind === "pot") add(createLathe([[0.06, 0.24], [0.14, 0.12], [0.1, 0]], 14), stone, x, 0.88, 0);
+      else {
+        const blade = add(new CapsuleGeometry(0.03, 0.5, 3, 6), stone, x, 0.94, 0);
+        blade.rotation.z = Math.PI / 2;
+      }
+    }
+    add(createRoundedBox(0.5, 0.4, 0.4, 3, 12, 8), wall, 1.25, 0.2, 0.15);
+  } else if (ob.kind === "well") {
+    add(new CylinderGeometry(0.55, 0.62, 0.62, detailed ? 22 : 14), stone, 0, 0.31, 0);
+    const water = add(new CircleGeometry(0.44, detailed ? 22 : 14), new MeshStandardMaterial({ color: palette.puddle, roughness: 0.2, metalness: 0.1 }), 0, 0.63, 0);
+    water.rotation.x = -Math.PI / 2;
+    for (const side of [-0.48, 0.48]) add(new CapsuleGeometry(0.05, 0.95, 4, 8), roofMat, side, 1.05, 0);
+    const bar = add(new CapsuleGeometry(0.035, 0.9, 3, 6), roofMat, 0, 1.38, 0);
+    bar.rotation.z = Math.PI / 2;
+    add(new CylinderGeometry(0.06, 0.72, 0.42, detailed ? 16 : 10), roofMat, 0, 1.72, 0);
+  } else if (ob.kind === "house") {
+    add(createRoundedBox(1.7, 1.35, 1.5, 3.2, detailed ? 24 : 16, detailed ? 14 : 10), wall, 0, 0.75, 0);
+    const roof = add(createLathe([[0.12, 1.0], [1.2, 0.08], [1.3, 0]], detailed ? 24 : 14), roofMat, 0, 1.38, 0);
+    roof.scale.set(0.95, 0.75, 0.85);
+    add(createRoundedBox(0.42, 0.66, 0.08, 3, 12, 8), roofMat, -0.86, 0.5, 0).rotation.y = Math.PI / 2;
   } else if (ob.kind === "log") {
     const log = add(new CapsuleGeometry(0.16, 1.1, 5, 10), roofMat, 0, 0.2, 0);
     log.rotation.z = Math.PI / 2;

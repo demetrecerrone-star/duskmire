@@ -958,3 +958,133 @@ button:focus-visible {
   .splat { animation: none; }
   .hp > span { transition: none; }
 }
+
+/* Town: zone card actions, the bank and store sheet, and the reset confirm. */
+.town-card { border-style: dashed; }
+.town-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.save-box {
+  margin: 0.8rem 0 0.6rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(196, 161, 90, 0.3);
+}
+.save-box .graphics-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; }
+.danger-outline { border-color: #a85a48; color: #e7c3b6; background: linear-gradient(180deg, #3e2e28, #241a16); }
+.danger { border-color: #c47a62; background: linear-gradient(180deg, #8a4636, #5a2a20); font-weight: 650; }
+
+#trade {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  background: rgba(16, 12, 8, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+#trade[hidden] { display: none; }
+
+.trade-sheet {
+  width: 100%;
+  max-height: min(80dvh, 640px);
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #3e342b, #241c16);
+  border: 1px solid var(--ochre);
+  border-bottom: none;
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -12px 40px var(--shadow);
+  padding: 0.75rem 0.8rem calc(0.7rem + env(safe-area-inset-bottom));
+}
+
+.trade-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }
+.trade-head h2 { margin: 0; font-size: 1.2rem; }
+.trade-coins { color: var(--ochre); font-weight: 650; }
+.trade-close { flex: none; }
+
+.trade-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin: 0.55rem 0 0.35rem;
+}
+.trade-tabs button[aria-selected="true"] {
+  border-color: var(--ochre);
+  background: linear-gradient(180deg, #6a5438, #3c2e22);
+}
+
+.trade-msg { margin: 0 0 0.4rem; min-height: 1.2em; font-size: 0.88rem; color: var(--parchment-dim); }
+
+.trade-cols { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.trade-col h3 { margin: 0.2rem 0 0.4rem; font-size: 0.95rem; color: var(--parchment-dim); }
+#trade[data-tab="bank"] .trade-col[data-col="pack"],
+#trade[data-tab="pack"] .trade-col[data-col="bank"],
+#trade[data-tab="buy"] .trade-col[data-col="sell"],
+#trade[data-tab="sell"] .trade-col[data-col="buy"] { display: none; }
+
+.trade-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.3rem;
+}
+.trade-grid.inv { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.trade-slot {
+  min-height: 52px;
+  padding: 0.15rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 0.7rem;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+.trade-slot small { color: var(--ochre); font-size: 0.68rem; }
+.trade-slot.empty { opacity: 0.35; }
+.trade-slot.selected { border-color: var(--ochre); box-shadow: inset 0 0 0 1px rgba(196, 161, 90, 0.55); }
+
+.trade-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0.2rem;
+  align-items: center;
+}
+.trade-actions button { flex: 1 1 8rem; }
+.trade-actions .pack-note { flex: 1 1 100%; margin: 0; }
+.deposit-all { border-color: var(--ochre); font-weight: 650; }
+
+.shop-list { display: grid; gap: 0.3rem; }
+.shop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.25rem 0.25rem 0.55rem;
+  border: 1px solid rgba(196, 161, 90, 0.25);
+  border-radius: 12px;
+  background: rgba(26, 21, 17, 0.4);
+}
+.shop-row strong { display: block; font-size: 0.92rem; }
+.shop-row small { color: var(--parchment-dim); font-size: 0.75rem; }
+.shop-row button { flex: none; min-width: 5.2rem; font-weight: 650; }
+
+@media (min-width: 980px) {
+  #trade { align-items: center; padding: 1rem; }
+  .trade-sheet { width: min(900px, 100%); border-radius: 18px; border-bottom: 1px solid var(--ochre); max-height: min(86vh, 680px); }
+  .trade-tabs { display: none; }
+  .trade-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  #trade .trade-col { display: block !important; }
+}
+
+@media (max-width: 979px) and (orientation: landscape) and (max-height: 600px) {
+  .trade-sheet { max-height: 92dvh; width: min(760px, 100%); }
+  .trade-grid.inv { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+  .trade-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .trade-slot { min-height: 44px; }
+}
